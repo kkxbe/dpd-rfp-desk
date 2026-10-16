@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DPD RFP Desk</title>
+<script>
+// ===== CONFIG: paste from Supabase > Project Settings > API =====
+window.DPD_CONFIG = { url: "https://uwcciwmsjzaslxhykyqc.supabase.co", anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV3Y2Npd21zanphc2x4aHlreXFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIxODM2MTEsImV4cCI6MjEwNzc1OTYxMX0.yNtNlvI0YcDvFOPOb1mPFznlC9oMRfYoI9MdK5EtXO4" };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600;700&family=IBM+Plex+Serif:wght@600&display=swap" rel="stylesheet">
+<style>
+:root{--navy:#0B2A3C;--teal:#0E7C77;--coral:#B4483A;--amber:#C27C0E;--ink:#1d2a33;--mute:#6b7a85;--line:#e3e8ec;--bg:#f6f8f9;--card:#fff;--green:#D9EFE6;--yellow:#FFF1C9;--red:#F8DEDA}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.4 "Instrument Sans",system-ui,sans-serif;color:var(--ink);background:var(--bg)}
+header{background:var(--navy);color:#fff;display:flex;align-items:center;gap:16px;padding:10px 18px;position:sticky;top:0;z-index:5;flex-wrap:wrap}
+header h1{font:600 18px "IBM Plex Serif",serif;margin:0}
+nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button{background:transparent;border:0;color:#cfe0e8;padding:8px 12px;border-radius:6px;font:600 13px inherit;cursor:pointer}
+nav button.on{background:#ffffff1f;color:#fff}
+.sp{flex:1}
+.who{font-size:12px;color:#cfe0e8}
+.bar{display:flex;gap:8px;align-items:center;padding:12px 18px;flex-wrap:wrap}
+input,select,textarea{font:inherit;border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:#fff;color:var(--ink)}
+button.b{background:var(--teal);color:#fff;border:0;border-radius:6px;padding:7px 12px;font-weight:600;cursor:pointer}
+button.g{background:#fff;color:var(--navy);border:1px solid var(--line);border-radius:6px;padding:7px 12px;font-weight:600;cursor:pointer}
+main{padding:0 18px 40px}
+.banner{margin:12px 18px 0;padding:10px 14px;border-radius:8px;background:var(--red);color:#7a2318;font-weight:600}
+.demo{background:var(--yellow);color:#6b4a00}
+table{border-collapse:collapse;width:100%;background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+th{background:#eef2f4;color:var(--navy);font-size:12px;text-align:left;padding:8px;position:sticky;top:0;z-index:2;white-space:nowrap}
+td{border-top:1px solid var(--line);padding:6px 8px;vertical-align:top}
+td input,td select,td textarea{width:100%;border-color:transparent;background:transparent;padding:4px}
+td input:hover,td select:hover,td textarea:hover{border-color:var(--line);background:#fff}
+td input:focus,td select:focus,td textarea:focus{border-color:var(--teal);background:#fff;outline:none}
+textarea{resize:vertical;min-height:30px}
+.gname{font-weight:700;color:var(--navy);cursor:pointer}
+.small{font-size:12px;color:var(--mute)}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700}
+.hold{background:var(--red);color:var(--coral)} .rel{background:var(--green);color:var(--teal)}
+.days{font-weight:700} .late{color:var(--coral)} .soon{color:var(--amber)}
+.chip{display:inline-block;width:34px;text-align:center;padding:3px 0;border-radius:5px;font-weight:700;cursor:pointer;user-select:none}
+.yes{background:var(--green);color:var(--teal)} .partial{background:var(--yellow);color:var(--amber)} .no{background:var(--red);color:var(--coral)}
+.fee td.v{width:120px}
+.Confirmed{background:var(--green)} .Stated{background:var(--yellow)} .Unknown{background:var(--red)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px}
+.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px}
+.card b{display:block;font-size:24px;color:var(--navy)}
+.drawer{position:fixed;right:0;top:0;bottom:0;width:min(520px,100%);background:#fff;box-shadow:-8px 0 24px #0002;z-index:10;padding:18px;overflow:auto;display:none}
+.drawer.on{display:block}
+.drawer h2{font:600 20px "IBM Plex Serif",serif;color:var(--navy);margin:0 0 8px}
+.drawer label{display:block;font-size:12px;color:var(--mute);margin-top:10px}
+.drawer input,.drawer select,.drawer textarea{width:100%}
+#login{max-width:360px;margin:12vh auto;background:#fff;border:1px solid var(--line);border-radius:10px;padding:24px}
+#login h2{font:600 22px "IBM Plex Serif",serif;color:var(--navy);margin:0 0 12px}
+#login input{width:100%;margin:6px 0}
+.wrap{overflow:auto;max-height:calc(100vh - 210px);border-radius:8px}
+td select{min-width:120px}
+td input[type=date]{min-width:130px}
+.fee td.v{width:auto;min-width:110px}
+.fee td select{min-width:115px}
+.ok{color:var(--teal);font-weight:700} .bad{color:var(--coral);font-weight:700}
+
+</style>
+</head>
+<body>
+<div id="login" style="display:none">
+  <h2>DPD RFP Desk</h2>
+  <div class="small">Sign in with your DPD team login.</div>
+  <input id="em" type="email" placeholder="Email" autocomplete="username">
+  <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+  <button class="b" id="go" style="width:100%;margin-top:8px">Sign in</button>
+  <div id="lerr" class="bad small" style="margin-top:8px"></div>
+</div>
+<div id="app" style="display:none">
+<header>
+  <h1>DPD RFP Desk</h1>
+  <nav id="tabs"></nav>
+  <span class="sp"></span>
+  <span class="who" id="who"></span>
+  <button class="g" id="xl" style="padding:5px 10px">Export Excel</button>
+  <button class="g" id="out" style="padding:5px 10px">Sign out</button>
+</header>
+<div id="banner"></div>
+<div class="bar">
+  <input id="q" placeholder="Search groups" style="min-width:220px">
+  <select id="fb"><option value="">All brokers</option></select>
+  <select id="fs"><option value="">All stages</option></select>
+  <span class="small" id="count"></span>
+</div>
+<main id="view"></main>
+</div>
+<div class="drawer" id="drawer"></div>
+<script>
+const C=window.DPD_CONFIG; const DEMO=!C.url||!C.anonKey;
+let sb=null, me="demo", S={groups:[],docs:[],fees:[],waiting:[],activity:[]}, tab="pipeline";
+const STAGES=["Need Benefit RE quote","Need data","Ready to build","Proposal drafted","Sent","Sold","Lost","Closed"];
+const ITEMS=[["census","Census"],["sbc","Current SBCs"],["rates","Current rates"],["renewal","Renewal"],["cap","CAP"],["claims","Claims / agg"],["lca","Large claimant"],["fonzo","FONZO"],["workbook","DPD workbook"],["calculator","In pricing"],["proposal","Proposal"]];
+const QT=["Kerix - BAS/39N","Kerix - Other quotes","Non-Kerix - BAS/39N","Non-Kerix - Other quotes"];
+const $=s=>document.querySelector(s), esc=s=>(s??"").toString().replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const today=new Date(); today.setHours(0,0,0,0);
+const daysTo=d=>d?Math.round((new Date(d+"T00:00:00")-today)/864e5):null;
+
+async function start(){
+  if(DEMO){ const r=await fetch("seed.json"); const j=await r.json(); S.groups=j.groups;S.docs=j.docs;S.fees=j.fees;
+    $("#banner").innerHTML='<div class="banner demo">Preview mode: not connected to the database yet. Edits are not saved.</div>'; showApp(); return;}
+  sb=supabase.createClient(C.url,C.anonKey);
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session){ $("#login").style.display="block"; return; }
+  me=session.user.email; showApp(); await loadAll(); live();
+}
+$("#go").onclick=async()=>{ const {error}=await sb.auth.signInWithPassword({email:$("#em").value,password:$("#pw").value});
+  if(error){$("#lerr").textContent=error.message;return;} location.reload(); };
+$("#out").onclick=async()=>{ if(sb) await sb.auth.signOut(); location.reload(); };
+function showApp(){ $("#app").style.display="block"; $("#who").textContent=me; tabs(); render(); }
+async function loadAll(){
+  const [g,d,f,w,a]=await Promise.all([sb.from("groups").select("*"),sb.from("docs").select("*"),sb.from("fee_lines").select("*").order("sort"),
+    sb.from("waiting_on").select("*").order("since"),sb.from("activity").select("*").order("at",{ascending:false}).limit(200)]);
+  S.groups=g.data||[];S.docs=d.data||[];S.fees=f.data||[];S.waiting=w.data||[];S.activity=a.data||[]; render();
+}
+let t0; function live(){ sb.channel("all").on("postgres_changes",{event:"*",schema:"public"},()=>{clearTimeout(t0);t0=setTimeout(loadAll,400);}).subscribe(); }
+async function save(table,match,patch,label,gid){
+  // update local copy first
+  const rows={groups:S.groups,docs:S.docs,fee_lines:S.fees,waiting_on:S.waiting}[table];
+  const row=rows.find(r=>Object.entries(match).every(([k,v])=>r[k]==v)); if(row) Object.assign(row,patch);
+  if(DEMO){render();return;}
+  const {error}=await sb.from(table).update({...patch,updated_by:me,updated_at:new Date().toISOString()}).match(match);
+  if(error){alert("Not saved: "+error.message);return;}
+  await sb.from("activity").insert({who:me,group_id:gid||null,change:label});
+}
+function tabs(){ const T=[["pipeline","Pipeline"],["snapshot","Snapshot"],["fees","Fee Check"],["waiting","Waiting On"],["activity","Activity"]];
+  $("#tabs").innerHTML=T.map(([k,v])=>`<button data-t="${k}" class="${k==tab?"on":""}">${v}</button>`).join("");
+  $("#tabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;tabs();render();});
+  const br=[...new Set(S.groups.map(g=>g.broker).filter(Boolean))].sort();
+  $("#fb").innerHTML='<option value="">All brokers</option>'+br.map(b=>`<option>${esc(b)}</option>`).join("");
+  $("#fs").innerHTML='<option value="">All stages</option>'+STAGES.map(s=>`<option>${s}</option>`).join("");
+}
+["q","fb","fs"].forEach(id=>$("#"+id).oninput=()=>render());
+function filtered(){ const q=$("#q").value.toLowerCase(),b=$("#fb").value,s=$("#fs").value;
+  return S.groups.filter(g=>(!q||g.name.toLowerCase().includes(q))&&(!b||g.broker==b)&&(!s||g.stage==s))
+    .sort((a,b)=>(a.effective||"9999").localeCompare(b.effective||"9999")||a.name.localeCompare(b.name)); }
+function qtype(g){ const k=g.kerix===false?"Non-Kerix":"Kerix"; return k+(g.quote_no?" - BAS/39N":" - Other quotes"); }
+function feeReady(qt){ return S.fees.filter(f=>f.quote_type==qt).every(f=>f.status=="Confirmed"); }
+function daysCell(g){ const d=daysTo(g.effective); if(d==null) return '<span class="small">confirm</span>';
+  return `<span class="days ${d<=45?"late":d<=75?"soon":""}">${d}</span>`; }
+function render(){ const v=$("#view"); const G=filtered(); $("#count").textContent=G.length+" groups";
+  if(tab=="pipeline") pipeline(v,G); else if(tab=="snapshot") snapshot(v,G); else if(tab=="fees") fees(v); else if(tab=="waiting") waiting(v,G); else activity(v); }
+function pipeline(v,G){
+  const hold=S.groups.filter(g=>g.status!="RELEASED").length;
+  v.innerHTML=`<div class="cards">
+   <div class="card"><b>${S.groups.length}</b>groups</div>
+   <div class="card"><b class="bad">${hold}</b>on HOLD (pricing verification)</div>
+   <div class="card"><b>${S.groups.filter(g=>(daysTo(g.effective)??999)<=60).length}</b>effective within 60 days</div>
+   <div class="card"><b>${S.groups.filter(g=>g.stage=="Need Benefit RE quote").length}</b>need a Benefit RE quote</div></div>
+  <div class="wrap"><table><tr><th>Group</th><th>Broker</th><th>Effective</th><th>Days</th><th>Stage</th><th>Status</th><th>Owner</th><th>Next step</th><th>Due</th><th>Follow up</th><th>Notes</th></tr>
+  ${G.map(g=>`<tr><td><span class="gname" data-g="${g.id}">${esc(g.name)}</span><div class="small">${g.quote_no?"Quote "+esc(g.quote_no):"No Benefit RE quote"}</div></td>
+   <td class="small">${esc(g.broker)}</td><td><input type="date" value="${g.effective||""}" data-f="effective" data-g="${g.id}"></td><td>${daysCell(g)}</td>
+   <td><select data-f="stage" data-g="${g.id}">${STAGES.map(s=>`<option ${s==g.stage?"selected":""}>${s}</option>`).join("")}</select></td>
+   <td><select data-f="status" data-g="${g.id}"><option ${g.status!="RELEASED"?"selected":""}>HOLD</option><option ${g.status=="RELEASED"?"selected":""}>RELEASED</option></select></td>
+   <td><input value="${esc(g.owner)}" data-f="owner" data-g="${g.id}"></td>
+   <td><textarea data-f="next_step" data-g="${g.id}">${esc(g.next_step)}</textarea></td>
+   <td><input type="date" value="${g.due||""}" data-f="due" data-g="${g.id}"></td>
+   <td><input type="date" value="${g.follow_up||""}" data-f="follow_up" data-g="${g.id}"></td>
+   <td><textarea data-f="notes" data-g="${g.id}">${esc(g.notes)}</textarea></td></tr>`).join("")}</table></div>
+  <p><button class="b" id="addg">+ Add opportunity</button></p>`;
+  bindGroupFields(v); $("#addg").onclick=addGroup;
+}
+function bindGroupFields(v){
+  v.querySelectorAll("[data-f]").forEach(el=>el.onchange=()=>{ const g=S.groups.find(x=>x.id==el.dataset.g), f=el.dataset.f; let val=el.value||null;
+    if(f=="status"&&val=="RELEASED"&&!feeReady(qtype(g))){ alert("Can't release: the Fee Check for '"+qtype(g)+"' still has lines that are not Confirmed."); el.value="HOLD"; return; }
+    save("groups",{id:g.id},{[f]:val},`${g.name}: ${f} → ${val??"(blank)"}`,g.id); });
+  v.querySelectorAll(".gname").forEach(el=>el.onclick=()=>openGroup(el.dataset.g));
+}
+function snapshot(v,G){
+  v.innerHTML=`<p class="small">Click a box to change it: <span class="chip no">✗</span> missing → <span class="chip partial">~</span> partial → <span class="chip yes">✓</span> on file.</p>
+  <div class="wrap"><table><tr><th>Group</th><th>Days</th>${ITEMS.map(i=>`<th>${i[1]}</th>`).join("")}<th>Missing (ask broker)</th><th>Accuracy notes</th><th>39N plans backed by SBC</th></tr>
+  ${G.map(g=>`<tr><td><span class="gname" data-g="${g.id}">${esc(g.name)}</span><div class="small">${esc(g.broker)}</div></td><td>${daysCell(g)}</td>
+   ${ITEMS.map(([k])=>{const d=S.docs.find(x=>x.group_id==g.id&&x.item==k)||{state:"no"};return `<td><span class="chip ${d.state}" data-g="${g.id}" data-i="${k}">${{yes:"✓",partial:"~",no:"✗"}[d.state]}</span></td>`}).join("")}
+   <td><textarea data-f="missing" data-g="${g.id}">${esc(g.missing)}</textarea></td><td><textarea data-f="accuracy" data-g="${g.id}">${esc(g.accuracy)}</textarea></td>
+   <td><input value="${esc(g.sbc_match)}" data-f="sbc_match" data-g="${g.id}"></td></tr>`).join("")}</table></div>`;
+  bindGroupFields(v);
+  v.querySelectorAll(".chip[data-g]").forEach(el=>el.onclick=async()=>{ const nx={no:"partial",partial:"yes",yes:"no"};
+    let d=S.docs.find(x=>x.group_id==el.dataset.g&&x.item==el.dataset.i);
+    if(!d){ d={group_id:el.dataset.g,item:el.dataset.i,state:"no"}; S.docs.push(d); if(!DEMO) await sb.from("docs").insert(d); }
+    const ns=nx[d.state]; const g=S.groups.find(x=>x.id==d.group_id);
+    await save("docs",{group_id:d.group_id,item:d.item},{state:ns},`${g.name}: ${d.item} → ${ns}`,d.group_id); render(); });
+}
+function fees(v){
+  const lines=[...new Map(S.fees.map(f=>[f.line,f])).values()].sort((a,b)=>a.sort-b.sort);
+  v.innerHTML=`<p class="small"><b>Release rule:</b> a quote type is ready only when every line is <span class="pill rel">Confirmed</span> in writing (save the email or fee schedule in the group folder and name it in "Source").</p>
+  <div class="wrap"><table class="fee"><tr><th>Fee line</th><th>What it pays for</th><th>Ask</th>${QT.map(q=>`<th colspan="2">${q}</th>`).join("")}</tr>
+  ${lines.map(l=>`<tr><td><b>${esc(l.line)}</b></td><td class="small">${esc(l.purpose)}</td><td class="small">${esc(l.ask)}</td>
+   ${QT.map(q=>{const f=S.fees.find(x=>x.quote_type==q&&x.line==l.line)||{};return `<td class="v ${f.status}"><input value="${f.pepm_text??(f.pepm??"")}" placeholder="$ PEPM" data-q="${esc(q)}" data-l="${esc(l.line)}" data-k="amt" title="${esc(f.source_doc||"")}"></td>
+     <td class="${f.status}"><select data-q="${esc(q)}" data-l="${esc(l.line)}" data-k="status">${["Confirmed","Stated","Unknown"].map(s=>`<option ${s==f.status?"selected":""}>${s}</option>`).join("")}</select></td>`}).join("")}</tr>`).join("")}
+  <tr><td colspan="3"><b>Total fees (excl. stop-loss, claims fund)</b></td>${QT.map(q=>`<td colspan="2"><b>$${S.fees.filter(f=>f.quote_type==q&&!["Stop-loss","Claims fund"].includes(f.line)).reduce((s,f)=>s+(+f.pepm||0),0).toFixed(2)}</b></td>`).join("")}</tr>
+  <tr><td colspan="3"><b>Lines not confirmed</b></td>${QT.map(q=>`<td colspan="2" class="bad">${S.fees.filter(f=>f.quote_type==q&&f.status!="Confirmed").length}</td>`).join("")}</tr>
+  <tr><td colspan="3"><b>READY TO RELEASE?</b></td>${QT.map(q=>`<td colspan="2">${feeReady(q)?'<span class="pill rel">YES</span>':'<span class="pill hold">NO - HOLD</span>'}</td>`).join("")}</tr></table></div>`;
+  v.querySelectorAll("[data-k]").forEach(el=>el.onchange=()=>{ const q=el.dataset.q,l=el.dataset.l; let p;
+    if(el.dataset.k=="status") p={status:el.value}; else { const n=parseFloat(el.value.replace(/[$,]/g,"")); p=isNaN(n)?{pepm:null,pepm_text:el.value||null}:{pepm:n,pepm_text:null}; }
+    save("fee_lines",{quote_type:q,line:l},p,`Fee Check ${q} / ${l}: ${JSON.stringify(p)}`).then(render); });
+}
+function waiting(v,G){ const ids=new Set(G.map(g=>g.id));
+  const W=S.waiting.filter(w=>ids.has(w.group_id)&&!w.done);
+  v.innerHTML=`<div class="wrap"><table><tr><th>Group</th><th>Waiting on</th><th>From</th><th>Since</th><th>Days</th><th>Notes</th><th>Done</th></tr>
+  ${W.map(w=>{const g=S.groups.find(x=>x.id==w.group_id)||{};const d=-daysTo(w.since);return `<tr><td class="gname">${esc(g.name)}</td><td><input value="${esc(w.what)}" data-w="${w.id}" data-k="what"></td>
+   <td><input value="${esc(w.from_whom)}" data-w="${w.id}" data-k="from_whom"></td><td>${w.since||""}</td><td class="${d>5?"bad":""}">${d}</td>
+   <td><input value="${esc(w.notes)}" data-w="${w.id}" data-k="notes"></td><td><input type="checkbox" data-w="${w.id}" data-k="done"></td></tr>`}).join("")||'<tr><td colspan="7" class="small">Nothing outstanding.</td></tr>'}</table></div>
+  <p><select id="wg">${S.groups.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(g=>`<option value="${g.id}">${esc(g.name)}</option>`).join("")}</select>
+   <input id="ww" placeholder="What are we waiting for?"> <input id="wf" placeholder="From (broker, Benefit RE...)"> <button class="b" id="wa">Add</button></p>`;
+  v.querySelectorAll("[data-w]").forEach(el=>el.onchange=()=>{const val=el.type=="checkbox"?el.checked:el.value;
+    save("waiting_on",{id:+el.dataset.w},{[el.dataset.k]:val},`Waiting on #${el.dataset.w}: ${el.dataset.k} → ${val}`).then(render);});
+  $("#wa").onclick=async()=>{ const row={group_id:$("#wg").value,what:$("#ww").value,from_whom:$("#wf").value};
+    if(!row.what) return; if(DEMO){S.waiting.push({...row,id:Date.now(),since:new Date().toISOString().slice(0,10)});render();return;}
+    const {error}=await sb.from("waiting_on").insert({...row,updated_by:me}); if(error) alert(error.message); else { await sb.from("activity").insert({who:me,group_id:row.group_id,change:"Waiting on: "+row.what}); loadAll(); } };
+}
+function activity(v){ v.innerHTML=`<div class="wrap"><table><tr><th>When</th><th>Who</th><th>Change</th></tr>${S.activity.map(a=>`<tr><td class="small">${new Date(a.at).toLocaleString()}</td><td class="small">${esc(a.who)}</td><td>${esc(a.change)}</td></tr>`).join("")||'<tr><td colspan="3" class="small">No activity yet.</td></tr>'}</table></div>`; }
+function openGroup(id){ const g=S.groups.find(x=>x.id==id); const D=$("#drawer");
+  const F=[["quote_no","Benefit RE quote #"],["quote_date","Quote date"],["broker","Broker"],["folder_url","SharePoint folder link"],["sent_date","Sent date","date"],["broker_response","Broker response"],["outcome","Outcome"]];
+  D.innerHTML=`<button class="g" style="float:right" id="dx">Close</button><h2>${esc(g.name)}</h2>
+   <div>${g.status=="RELEASED"?'<span class="pill rel">RELEASED</span>':'<span class="pill hold">HOLD</span>'} <span class="small">Fee Check type: ${qtype(g)} ${feeReady(qtype(g))?'(ready)':'(not ready)'}</span></div>
+   ${g.folder_url?`<p><a href="${esc(g.folder_url)}" target="_blank" rel="noopener">Open SharePoint folder</a></p>`:""}
+   <label>Kerix?</label><select data-f="kerix" data-g="${g.id}"><option value="">Confirm</option><option value="true" ${g.kerix===true?"selected":""}>Yes</option><option value="false" ${g.kerix===false?"selected":""}>No</option></select>
+   ${F.map(([k,l,t])=>`<label>${l}</label><input ${t?`type="${t}"`:""} value="${esc(g[k])}" data-f="${k}" data-g="${g.id}">`).join("")}
+   <label>Missing (ask broker)</label><textarea data-f="missing" data-g="${g.id}">${esc(g.missing)}</textarea>
+   <label>Accuracy notes</label><textarea data-f="accuracy" data-g="${g.id}">${esc(g.accuracy)}</textarea>
+   <label>Recent activity</label><div class="small">${S.activity.filter(a=>a.group_id==id).slice(0,12).map(a=>`${new Date(a.at).toLocaleDateString()} · ${esc(a.who)} · ${esc(a.change)}`).join("<br>")||"None"}</div>`;
+  D.classList.add("on"); $("#dx").onclick=()=>D.classList.remove("on");
+  D.querySelectorAll("[data-f]").forEach(el=>el.onchange=()=>{ let val=el.value; if(el.dataset.f=="kerix") val=val===""?null:val==="true";
+    save("groups",{id:g.id},{[el.dataset.f]:val||val===false?val:null},`${g.name}: ${el.dataset.f} → ${val}`,g.id); });
+}
+async function addGroup(){ const name=prompt("Group name"); if(!name) return; const broker=prompt("Broker (e.g. Jason Roll (Kerix))")||null;
+  const id=name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+  const row={id,name,broker,stage:"Need data",status:"HOLD",owner:me};
+  if(DEMO){S.groups.push(row);render();return;}
+  const {error}=await sb.from("groups").insert(row); if(error){alert(error.message);return;}
+  await sb.from("docs").insert(ITEMS.map(([k])=>({group_id:id,item:k,state:"no"}))); await sb.from("activity").insert({who:me,group_id:id,change:"Added opportunity "+name}); loadAll(); }
+$("#xl").onclick=()=>{ const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(S.groups.map(g=>({Group:g.name,Broker:g.broker,Effective:g.effective,Days:daysTo(g.effective),Stage:g.stage,Status:g.status,Owner:g.owner,"Next step":g.next_step,Due:g.due,"Follow up":g.follow_up,Missing:g.missing,Accuracy:g.accuracy,Notes:g.notes}))),"Pipeline");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(S.groups.map(g=>Object.fromEntries([["Group",g.name],...ITEMS.map(([k,l])=>[l,(S.docs.find(d=>d.group_id==g.id&&d.item==k)||{}).state||"no"])]))),"Snapshot");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(S.fees.map(f=>({"Quote type":f.quote_type,Line:f.line,"$ PEPM":f.pepm??f.pepm_text,Status:f.status,Source:f.source_doc}))),"Fee Check");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(S.waiting),"Waiting On");
+  XLSX.writeFile(wb,"DPD RFP Desk "+new Date().toISOString().slice(0,10)+".xlsx"); };
+start();
+</script>
+</body>
+</html>
