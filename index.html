@@ -74,12 +74,22 @@ td input[type=date]{min-width:130px}
   <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
   <button class="b" id="go" style="width:100%;margin-top:8px">Sign in</button>
   <div id="lerr" class="bad small" style="margin-top:8px"></div>
+  <div class="small" style="margin-top:10px"><a href="#" id="forgot">Forgot password?</a></div>
+</div>
+<div id="setpw" style="display:none;max-width:360px;margin:12vh auto;background:#fff;border:1px solid var(--line);border-radius:10px;padding:24px">
+  <h2 style="font:600 22px 'IBM Plex Serif',serif;color:var(--navy);margin:0 0 12px">Set your password</h2>
+  <div class="small" id="spwho"></div>
+  <input id="np1" type="password" placeholder="New password (8+ characters)" autocomplete="new-password" style="width:100%;margin:6px 0">
+  <input id="np2" type="password" placeholder="Repeat new password" autocomplete="new-password" style="width:100%;margin:6px 0">
+  <button class="b" id="spgo" style="width:100%;margin-top:8px">Save password and open the desk</button>
+  <div id="sperr" class="bad small" style="margin-top:8px"></div>
 </div>
 <div id="app" style="display:none">
 <header>
   <h1>DPD RFP Desk</h1>
   <nav id="tabs"></nav>
   <span class="sp"></span>
+  <span class="who" id="sync"></span>
   <span class="who" id="who"></span>
   <button class="g" id="xl" style="padding:5px 10px">Export Excel</button>
   <button class="g" id="out" style="padding:5px 10px">Sign out</button>
@@ -96,7 +106,11 @@ td input[type=date]{min-width:130px}
 <div class="drawer" id="drawer"></div>
 <script>
 const C=window.DPD_CONFIG; const DEMO=!C.url||!C.anonKey;
-let sb=null, me="demo", S={groups:[],docs:[],fees:[],waiting:[],activity:[]}, tab="pipeline";
+const AUTH_LINK=/type=(invite|recovery)/.test(location.hash); // captured before supabase-js clears the URL
+let sb=null, me="demo", S={groups:[],docs:[],fees:[],waiting:[],activity:[],runs:[]}, tab="pipeline";
+const SP_HOST="https://directpaydesigns432.sharepoint.com", SP_LIB="/sites/DirectPayDesignsDocuments/03_Clients  INTERNAL", SP_ROOT=SP_LIB+"/2026 DPD RFPs/Level-Funded/";
+const folderLink=g=>g.folder_url||(g.folder_path?SP_HOST+"/sites/DirectPayDesignsDocuments/03_Clients%20%20INTERNAL/Forms/AllItems.aspx?id="+encodeURIComponent(SP_ROOT+g.folder_path):null);
+const PSTAT={requested:["Requested","partial"],building:["Building","partial"],ready:["Draft ready","yes"],failed:["Needs attention","no"]};
 const STAGES=["Need Benefit RE quote","Need data","Ready to build","Proposal drafted","Sent","Sold","Lost","Closed"];
 const ITEMS=[["census","Census"],["sbc","Current SBCs"],["rates","Current rates"],["renewal","Renewal"],["cap","CAP"],["claims","Claims / agg"],["lca","Large claimant"],["fonzo","FONZO"],["workbook","DPD workbook"],["calculator","In pricing"],["proposal","Proposal"]];
 const QT=["Kerix - BAS/39N","Kerix - Other quotes","Non-Kerix - BAS/39N","Non-Kerix - Other quotes"];
@@ -110,16 +124,27 @@ async function start(){
   sb=supabase.createClient(C.url,C.anonKey);
   const {data:{session}}=await sb.auth.getSession();
   if(!session){ $("#login").style.display="block"; return; }
+  if(AUTH_LINK){ $("#setpw").style.display="block"; $("#spwho").textContent=session.user.email; return; }
   me=session.user.email; showApp(); await loadAll(); live();
 }
 $("#go").onclick=async()=>{ const {error}=await sb.auth.signInWithPassword({email:$("#em").value,password:$("#pw").value});
   if(error){$("#lerr").textContent=error.message;return;} location.reload(); };
+$("#pw").onkeydown=e=>{ if(e.key=="Enter") $("#go").click(); };
+$("#forgot").onclick=async e=>{ e.preventDefault(); const em=$("#em").value.trim(); if(!em){$("#lerr").textContent="Type your email above first.";return;}
+  const {error}=await sb.auth.resetPasswordForEmail(em,{redirectTo:location.origin}); $("#lerr").textContent=error?error.message:"If that email has a login, a reset link is on its way."; };
+$("#spgo").onclick=async()=>{ const a=$("#np1").value,b=$("#np2").value;
+  if(a.length<8){$("#sperr").textContent="Use at least 8 characters.";return;} if(a!==b){$("#sperr").textContent="The two passwords don't match.";return;}
+  const {error}=await sb.auth.updateUser({password:a}); if(error){$("#sperr").textContent=error.message;return;}
+  location.replace(location.origin); };
 $("#out").onclick=async()=>{ if(sb) await sb.auth.signOut(); location.reload(); };
 function showApp(){ $("#app").style.display="block"; $("#who").textContent=me; tabs(); render(); }
 async function loadAll(){
-  const [g,d,f,w,a]=await Promise.all([sb.from("groups").select("*"),sb.from("docs").select("*"),sb.from("fee_lines").select("*").order("sort"),
-    sb.from("waiting_on").select("*").order("since"),sb.from("activity").select("*").order("at",{ascending:false}).limit(200)]);
-  S.groups=g.data||[];S.docs=d.data||[];S.fees=f.data||[];S.waiting=w.data||[];S.activity=a.data||[]; render();
+  const [g,d,f,w,a,r]=await Promise.all([sb.from("groups").select("*"),sb.from("docs").select("*"),sb.from("fee_lines").select("*").order("sort"),
+    sb.from("waiting_on").select("*").order("since"),sb.from("activity").select("*").order("at",{ascending:false}).limit(200),
+    sb.from("sync_runs").select("*").order("at",{ascending:false}).limit(1)]);
+  S.groups=g.data||[];S.docs=d.data||[];S.fees=f.data||[];S.waiting=w.data||[];S.activity=a.data||[];S.runs=r.data||[];
+  $("#sync").textContent=S.runs[0]?"SharePoint sync: "+new Date(S.runs[0].at).toLocaleString([], {month:"numeric",day:"numeric",hour:"numeric",minute:"2-digit"}):"SharePoint sync: not run yet";
+  render(); if($("#drawer").classList.contains("on")&&openId) openGroup(openId);
 }
 let t0; function live(){ sb.channel("all").on("postgres_changes",{event:"*",schema:"public"},()=>{clearTimeout(t0);t0=setTimeout(loadAll,400);}).subscribe(); }
 async function save(table,match,patch,label,gid){
@@ -156,7 +181,7 @@ function pipeline(v,G){
    <div class="card"><b>${S.groups.filter(g=>(daysTo(g.effective)??999)<=60).length}</b>effective within 60 days</div>
    <div class="card"><b>${S.groups.filter(g=>g.stage=="Need Benefit RE quote").length}</b>need a Benefit RE quote</div></div>
   <div class="wrap"><table><tr><th>Group</th><th>Broker</th><th>Effective</th><th>Days</th><th>Stage</th><th>Status</th><th>Owner</th><th>Next step</th><th>Due</th><th>Follow up</th><th>Notes</th></tr>
-  ${G.map(g=>`<tr><td><span class="gname" data-g="${g.id}">${esc(g.name)}</span><div class="small">${g.quote_no?"Quote "+esc(g.quote_no):"No Benefit RE quote"}</div></td>
+  ${G.map(g=>`<tr><td><span class="gname" data-g="${g.id}">${esc(g.name)}</span><div class="small">${g.quote_no?"Quote "+esc(g.quote_no):"No Benefit RE quote"}${folderLink(g)?` · <a href="${esc(folderLink(g))}" target="_blank" rel="noopener">Folder</a>`:""}${g.proposal_status&&PSTAT[g.proposal_status]?` · <span class="chip ${PSTAT[g.proposal_status][1]}" style="width:auto;padding:1px 6px;cursor:default">${PSTAT[g.proposal_status][0]}</span>`:""}</div></td>
    <td class="small">${esc(g.broker)}</td><td><input type="date" value="${g.effective||""}" data-f="effective" data-g="${g.id}"></td><td>${daysCell(g)}</td>
    <td><select data-f="stage" data-g="${g.id}">${STAGES.map(s=>`<option ${s==g.stage?"selected":""}>${s}</option>`).join("")}</select></td>
    <td><select data-f="status" data-g="${g.id}"><option ${g.status!="RELEASED"?"selected":""}>HOLD</option><option ${g.status=="RELEASED"?"selected":""}>RELEASED</option></select></td>
@@ -217,23 +242,38 @@ function waiting(v,G){ const ids=new Set(G.map(g=>g.id));
     const {error}=await sb.from("waiting_on").insert({...row,updated_by:me}); if(error) alert(error.message); else { await sb.from("activity").insert({who:me,group_id:row.group_id,change:"Waiting on: "+row.what}); loadAll(); } };
 }
 function activity(v){ v.innerHTML=`<div class="wrap"><table><tr><th>When</th><th>Who</th><th>Change</th></tr>${S.activity.map(a=>`<tr><td class="small">${new Date(a.at).toLocaleString()}</td><td class="small">${esc(a.who)}</td><td>${esc(a.change)}</td></tr>`).join("")||'<tr><td colspan="3" class="small">No activity yet.</td></tr>'}</table></div>`; }
-function openGroup(id){ const g=S.groups.find(x=>x.id==id); const D=$("#drawer");
-  const F=[["quote_no","Benefit RE quote #"],["quote_date","Quote date"],["broker","Broker"],["folder_url","SharePoint folder link"],["sent_date","Sent date","date"],["broker_response","Broker response"],["outcome","Outcome"]];
+let openId=null;
+function openGroup(id){ const g=S.groups.find(x=>x.id==id); if(!g) return; openId=id; const D=$("#drawer");
+  const F=[["quote_no","Benefit RE quote #"],["quote_date","Quote date"],["broker","Broker"],["sent_date","Sent date","date"],["broker_response","Broker response"],["outcome","Outcome"]];
+  const ps=g.proposal_status, busy=ps=="requested"||ps=="building";
   D.innerHTML=`<button class="g" style="float:right" id="dx">Close</button><h2>${esc(g.name)}</h2>
    <div>${g.status=="RELEASED"?'<span class="pill rel">RELEASED</span>':'<span class="pill hold">HOLD</span>'} <span class="small">Fee Check type: ${qtype(g)} ${feeReady(qtype(g))?'(ready)':'(not ready)'}</span></div>
-   ${g.folder_url?`<p><a href="${esc(g.folder_url)}" target="_blank" rel="noopener">Open SharePoint folder</a></p>`:""}
+   <p>${folderLink(g)?`<a class="g" style="display:inline-block;text-decoration:none;border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-weight:600;color:var(--navy)" href="${esc(folderLink(g))}" target="_blank" rel="noopener">Open SharePoint folder</a>`:'<span class="small">No folder linked yet.</span>'}</p>
+   <div class="card" style="margin:10px 0">
+     <b style="font-size:15px">Proposal</b>
+     <div class="small" style="margin:4px 0 8px">${ps&&PSTAT[ps]?`<span class="chip ${PSTAT[ps][1]}" style="width:auto;padding:1px 6px;cursor:default">${PSTAT[ps][0]}</span> `:""}${g.proposal_requested_at?`requested ${new Date(g.proposal_requested_at).toLocaleString()} by ${esc(g.proposal_requested_by)}`:"Not requested yet."}${g.proposal_note?`<br>${esc(g.proposal_note)}`:""}</div>
+     ${g.proposal_url?`<p style="margin:0 0 8px"><a href="${esc(g.proposal_url)}" target="_blank" rel="noopener">Open latest draft proposal</a></p>`:""}
+     <button class="b" id="preq" ${busy?"disabled style='opacity:.5'":""}>${busy?"Request in the queue":g.proposal_url?"Rebuild proposal":"Request proposal"}</button>
+     ${busy?'<button class="g" id="pcancel" style="margin-left:6px">Cancel request</button>':""}
+     <div class="small" style="margin-top:6px">Claude builds a DRAFT from the pricing calculator and saves it to the group's 06 Proposal folder. Drafts stay internal while the group is on HOLD.</div>
+   </div>
+   <label>SharePoint folder (path under Level-Funded)</label><input value="${esc(g.folder_path)}" data-f="folder_path" data-g="${g.id}">
    <label>Kerix?</label><select data-f="kerix" data-g="${g.id}"><option value="">Confirm</option><option value="true" ${g.kerix===true?"selected":""}>Yes</option><option value="false" ${g.kerix===false?"selected":""}>No</option></select>
    ${F.map(([k,l,t])=>`<label>${l}</label><input ${t?`type="${t}"`:""} value="${esc(g[k])}" data-f="${k}" data-g="${g.id}">`).join("")}
    <label>Missing (ask broker)</label><textarea data-f="missing" data-g="${g.id}">${esc(g.missing)}</textarea>
    <label>Accuracy notes</label><textarea data-f="accuracy" data-g="${g.id}">${esc(g.accuracy)}</textarea>
    <label>Recent activity</label><div class="small">${S.activity.filter(a=>a.group_id==id).slice(0,12).map(a=>`${new Date(a.at).toLocaleDateString()} · ${esc(a.who)} · ${esc(a.change)}`).join("<br>")||"None"}</div>`;
-  D.classList.add("on"); $("#dx").onclick=()=>D.classList.remove("on");
+  D.classList.add("on"); $("#dx").onclick=()=>{D.classList.remove("on");openId=null;};
+  $("#preq").onclick=async()=>{ if(busy) return; const now=new Date().toISOString();
+    await save("groups",{id:g.id},{proposal_status:"requested",proposal_requested_at:now,proposal_requested_by:me,proposal_note:null},`${g.name}: proposal requested`,g.id); openGroup(id); };
+  if($("#pcancel")) $("#pcancel").onclick=async()=>{ await save("groups",{id:g.id},{proposal_status:null,proposal_note:"Request cancelled"},`${g.name}: proposal request cancelled`,g.id); openGroup(id); };
   D.querySelectorAll("[data-f]").forEach(el=>el.onchange=()=>{ let val=el.value; if(el.dataset.f=="kerix") val=val===""?null:val==="true";
     save("groups",{id:g.id},{[el.dataset.f]:val||val===false?val:null},`${g.name}: ${el.dataset.f} → ${val}`,g.id); });
 }
 async function addGroup(){ const name=prompt("Group name"); if(!name) return; const broker=prompt("Broker (e.g. Jason Roll (Kerix))")||null;
   const id=name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
-  const row={id,name,broker,stage:"Need data",status:"HOLD",owner:me};
+  const fp=prompt("SharePoint folder under Level-Funded (leave as-is if the folder has the same name)", (broker||"").startsWith("Jason Roll")?"Jason Roll Kerix/"+name:name);
+  const row={id,name,broker,stage:"Need data",status:"HOLD",owner:me,folder_path:fp||name};
   if(DEMO){S.groups.push(row);render();return;}
   const {error}=await sb.from("groups").insert(row); if(error){alert(error.message);return;}
   await sb.from("docs").insert(ITEMS.map(([k])=>({group_id:id,item:k,state:"no"}))); await sb.from("activity").insert({who:me,group_id:id,change:"Added opportunity "+name}); loadAll(); }
