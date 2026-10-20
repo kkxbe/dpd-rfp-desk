@@ -139,10 +139,10 @@ $("#spgo").onclick=async()=>{ const a=$("#np1").value,b=$("#np2").value;
 $("#out").onclick=async()=>{ if(sb) await sb.auth.signOut(); location.reload(); };
 function showApp(){ $("#app").style.display="block"; $("#who").textContent=me; tabs(); render(); }
 async function loadAll(){
-  const [g,d,f,w,a,r]=await Promise.all([sb.from("groups").select("*"),sb.from("docs").select("*"),sb.from("fee_lines").select("*").order("sort"),
+  const [g,d,f,w,a,r,q]=await Promise.all([sb.from("groups").select("*"),sb.from("docs").select("*"),sb.from("fee_lines").select("*").order("sort"),
     sb.from("waiting_on").select("*").order("since"),sb.from("activity").select("*").order("at",{ascending:false}).limit(200),
-    sb.from("sync_runs").select("*").order("at",{ascending:false}).limit(1)]);
-  S.groups=g.data||[];S.docs=d.data||[];S.fees=f.data||[];S.waiting=w.data||[];S.activity=a.data||[];S.runs=r.data||[];
+    sb.from("sync_runs").select("*").order("at",{ascending:false}).limit(1),sb.from("claude_requests").select("*").order("created_at",{ascending:false}).limit(300)]);
+  S.groups=g.data||[];S.docs=d.data||[];S.fees=f.data||[];S.waiting=w.data||[];S.activity=a.data||[];S.runs=r.data||[];S.asks=q.data||[];
   $("#sync").textContent=S.runs[0]?"SharePoint sync: "+new Date(S.runs[0].at).toLocaleString([], {month:"numeric",day:"numeric",hour:"numeric",minute:"2-digit"}):"SharePoint sync: not run yet";
   render(); if($("#drawer").classList.contains("on")&&openId) openGroup(openId);
 }
@@ -258,6 +258,16 @@ function openGroup(id){ const g=S.groups.find(x=>x.id==id); if(!g) return; openI
      ${busy?'<button class="g" id="pcancel" style="margin-left:6px">Cancel request</button>':""}
      <div class="small" style="margin-top:6px">Claude builds a DRAFT from the pricing calculator and saves it to the group's 06 Proposal folder. Drafts stay internal while the group is on HOLD.</div>
    </div>
+   <div class="card" style="margin:10px 0">
+     <b style="font-size:15px">Ask Claude</b>
+     <div class="small" style="margin:4px 0 6px">Tell Claude what changed and where it is. It reads the folder, updates the calculator and this desk, and answers here, usually within a minute or two.</div>
+     <textarea id="askq" placeholder="e.g. Renewal is in 02, second PDF, page 18. Pull current and renewal rates into the calculator."></textarea>
+     <button class="b" id="askgo" style="margin-top:6px">Ask</button>
+     <div id="asklist" style="margin-top:8px">${(S.asks||[]).filter(x=>x.group_id==id).slice(0,8).map(x=>`<div class="small" style="border-top:1px solid var(--line);padding:6px 0">
+       <b>${esc(x.created_by||"")}</b> · ${new Date(x.created_at).toLocaleString([], {month:"numeric",day:"numeric",hour:"numeric",minute:"2-digit"})}: ${esc(x.ask)}<br>
+       <span class="chip ${{done:"yes",error:"no",needs_info:"partial"}[x.status]||"partial"}" style="width:auto;padding:1px 6px;cursor:default">${{queued:"Queued",working:"Working…",done:"Done",needs_info:"Question for you",error:"Couldn't do it"}[x.status]||x.status}</span>
+       ${x.reply?`<div style="white-space:pre-wrap;margin-top:4px;color:var(--ink)">${esc(x.reply)}</div>`:""}</div>`).join("")}</div>
+   </div>
    <label>SharePoint folder (path under Level-Funded)</label><input value="${esc(g.folder_path)}" data-f="folder_path" data-g="${g.id}">
    <label>Kerix?</label><select data-f="kerix" data-g="${g.id}"><option value="">Confirm</option><option value="true" ${g.kerix===true?"selected":""}>Yes</option><option value="false" ${g.kerix===false?"selected":""}>No</option></select>
    ${F.map(([k,l,t])=>`<label>${l}</label><input ${t?`type="${t}"`:""} value="${esc(g[k])}" data-f="${k}" data-g="${g.id}">`).join("")}
@@ -267,6 +277,11 @@ function openGroup(id){ const g=S.groups.find(x=>x.id==id); if(!g) return; openI
   D.classList.add("on"); $("#dx").onclick=()=>{D.classList.remove("on");openId=null;};
   $("#preq").onclick=async()=>{ if(busy) return; const now=new Date().toISOString();
     await save("groups",{id:g.id},{proposal_status:"requested",proposal_requested_at:now,proposal_requested_by:me,proposal_note:null},`${g.name}: proposal requested`,g.id); openGroup(id); };
+  $("#askgo").onclick=async()=>{ const ask=$("#askq").value.trim(); if(!ask) return; $("#askgo").disabled=true;
+    const {data,error}=await sb.from("claude_requests").insert({group_id:g.id,ask,created_by:me}).select().single();
+    if(error){alert(error.message);$("#askgo").disabled=false;return;}
+    S.asks=[data,...(S.asks||[])]; openGroup(id);
+    const {error:e2}=await sb.functions.invoke("ask-claude",{body:{id:data.id}}); if(e2) alert("Claude couldn't start: "+e2.message); };
   if($("#pcancel")) $("#pcancel").onclick=async()=>{ await save("groups",{id:g.id},{proposal_status:null,proposal_note:"Request cancelled"},`${g.name}: proposal request cancelled`,g.id); openGroup(id); };
   D.querySelectorAll("[data-f]").forEach(el=>el.onchange=()=>{ let val=el.value; if(el.dataset.f=="kerix") val=val===""?null:val==="true";
     save("groups",{id:g.id},{[el.dataset.f]:val||val===false?val:null},`${g.name}: ${el.dataset.f} → ${val}`,g.id); });
