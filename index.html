@@ -194,7 +194,8 @@ function pipeline(v,G){
   bindGroupFields(v); $("#addg").onclick=addGroup;
 }
 function bindGroupFields(v){
-  v.querySelectorAll("[data-f]").forEach(el=>el.onchange=()=>{ const g=S.groups.find(x=>x.id==el.dataset.g), f=el.dataset.f; let val=el.value||null;
+  v.querySelectorAll("[data-f]").forEach(el=>el.onchange=()=>{ const g=S.groups.find(x=>x.id==el.dataset.g), f=el.dataset.f; let val=el.value===""?null:el.value; if(el.type=="number"&&val!=null) val=parseFloat(val);
+    if(f=="status"&&val=="RELEASED"&&g.broker_comp_pepm==null){ alert("Can't release: enter the broker commission for this group first (0 if none)."); el.value="HOLD"; return; }
     if(f=="status"&&val=="RELEASED"&&!feeReady(qtype(g))){ alert("Can't release: the Fee Check for '"+qtype(g)+"' still has lines that are not Confirmed."); el.value="HOLD"; return; }
     save("groups",{id:g.id},{[f]:val},`${g.name}: ${f} → ${val??"(blank)"}`,g.id); });
   v.querySelectorAll(".gname").forEach(el=>el.onclick=()=>openGroup(el.dataset.g));
@@ -218,7 +219,7 @@ function fees(v){
   v.innerHTML=`<p class="small"><b>Release rule:</b> a quote type is ready only when every line is <span class="pill rel">Confirmed</span> in writing (save the email or fee schedule in the group folder and name it in "Source").</p>
   <div class="wrap"><table class="fee"><tr><th>Fee line</th><th>What it pays for</th><th>Ask</th>${QT.map(q=>`<th colspan="2">${q}</th>`).join("")}</tr>
   ${lines.map(l=>`<tr><td><b>${esc(l.line)}</b></td><td class="small">${esc(l.purpose)}</td><td class="small">${esc(l.ask)}</td>
-   ${QT.map(q=>{const f=S.fees.find(x=>x.quote_type==q&&x.line==l.line)||{};return `<td class="v ${f.status}"><input value="${f.pepm_text??(f.pepm??"")}" placeholder="$ PEPM" data-q="${esc(q)}" data-l="${esc(l.line)}" data-k="amt" title="${esc(f.source_doc||"")}"></td>
+   ${l.line=="Broker commission"?`<td colspan="${QT.length*2}" class="small"><b>Set per group</b> in each group's panel (what the broker asked for). Not part of these totals.</td>`:QT.map(q=>{const f=S.fees.find(x=>x.quote_type==q&&x.line==l.line)||{};return `<td class="v ${f.status}"><input value="${f.pepm_text??(f.pepm??"")}" placeholder="$ PEPM" data-q="${esc(q)}" data-l="${esc(l.line)}" data-k="amt" title="${esc(f.source_doc||"")}"></td>
      <td class="${f.status}"><select data-q="${esc(q)}" data-l="${esc(l.line)}" data-k="status">${["Confirmed","Stated","Unknown"].map(s=>`<option ${s==f.status?"selected":""}>${s}</option>`).join("")}</select></td>`}).join("")}</tr>`).join("")}
   <tr><td colspan="3"><b>Total fees (excl. stop-loss, claims fund)</b></td>${QT.map(q=>`<td colspan="2"><b>$${S.fees.filter(f=>f.quote_type==q&&!["Stop-loss","Claims fund"].includes(f.line)).reduce((s,f)=>s+(+f.pepm||0),0).toFixed(2)}</b></td>`).join("")}</tr>
   <tr><td colspan="3"><b>Lines not confirmed</b></td>${QT.map(q=>`<td colspan="2" class="bad">${S.fees.filter(f=>f.quote_type==q&&f.status!="Confirmed").length}</td>`).join("")}</tr>
@@ -244,7 +245,7 @@ function waiting(v,G){ const ids=new Set(G.map(g=>g.id));
 function activity(v){ v.innerHTML=`<div class="wrap"><table><tr><th>When</th><th>Who</th><th>Change</th></tr>${S.activity.map(a=>`<tr><td class="small">${new Date(a.at).toLocaleString()}</td><td class="small">${esc(a.who)}</td><td>${esc(a.change)}</td></tr>`).join("")||'<tr><td colspan="3" class="small">No activity yet.</td></tr>'}</table></div>`; }
 let openId=null;
 function openGroup(id){ const g=S.groups.find(x=>x.id==id); if(!g) return; openId=id; const D=$("#drawer");
-  const F=[["quote_no","Benefit RE quote #"],["quote_date","Quote date"],["broker","Broker"],["sent_date","Sent date","date"],["broker_response","Broker response"],["outcome","Outcome"]];
+  const F=[["quote_no","Benefit RE quote #"],["quote_date","Quote date"],["broker","Broker"],["broker_comp_pepm","Broker commission: $ PEPM the broker asked for (0 if none)","number"],["broker_comp_note","Commission note (who asked, % or flat, where it is in writing)"],["sent_date","Sent date","date"],["broker_response","Broker response"],["outcome","Outcome"]];
   const ps=g.proposal_status, busy=ps=="requested"||ps=="building";
   D.innerHTML=`<button class="g" style="float:right" id="dx">Close</button><h2>${esc(g.name)}</h2>
    <div>${g.status=="RELEASED"?'<span class="pill rel">RELEASED</span>':'<span class="pill hold">HOLD</span>'} <span class="small">Fee Check type: ${qtype(g)} ${feeReady(qtype(g))?'(ready)':'(not ready)'}</span></div>
