@@ -6,6 +6,7 @@
 // Secrets (Supabase > Edge Functions > Secrets): ANTHROPIC_API_KEY, MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET.
 // SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are provided by Supabase.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import JSZip from "https://esm.sh/jszip@3.10.1";
 
 const SP_HOSTNAME = "directpaydesigns432.sharepoint.com";
 const SP_SITE = "/sites/DirectPayDesignsDocuments";
@@ -67,7 +68,102 @@ async function calcPath(g: any) {
   if (!f) throw new Error("No calculator in 06 Decision");
   return `${folder}/${f.name}`;
 }
-const wbUrl = async (g: any, sheet: string, range: string) => `${itemPath(g.folder_path, await calcPath(g))}:/workbook/worksheets('${encodeURIComponent(sheet)}')/range(address='${encodeURIComponent(range)}')`;
+// ---- direct .xlsx editing (Excel Online's workbook API does not accept app-only sign-in) ----
+const attr = (tag: string, n: string) => (tag.match(new RegExp(`\\b${n}="([^"]*)"`)) || [])[1];
+const unxml = (t: string) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+const xml = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const colNum = (c: string) => c.split("").reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
+const colStr = (n: number) => { let s = ""; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
+function parseRange(rg: string) {
+  const [a, b] = rg.replace(/\$/g, "").toUpperCase().split(":");
+  const p = (x: string) => { const m = x.match(/^([A-Z]+)(\d+)$/); if (!m) throw new Error("Bad range " + rg); return [colNum(m[1]), +m[2]]; };
+  const s0 = p(a), e0 = b ? p(b) : s0; return { c1: s0[0], r1: s0[1], c2: e0[0], r2: e0[1] };
+}
+async function loadCalc(g: any) {
+  const rel = await calcPath(g);
+  const res = await graph(`${itemPath(g.folder_path, rel)}:/content`, {}, true) as Response;
+  const zip = await JSZip.loadAsync(new Uint8Array(await res.arrayBuffer()));
+  return { rel, zip };
+}
+async function sheetFile(zip: any, sheet: string) {
+  const wb = await zip.file("xl/workbook.xml").async("string");
+  const tag = [...wb.matchAll(/<sheet\b[^>]*>/g)].map((x: any) => x[0]).find((t: string) => unxml(attr(t, "name") || "") === sheet);
+  if (!tag) throw new Error(`No sheet named '${sheet}'`);
+  const rid = attr(tag, "r:id");
+  const rels = await zip.file("xl/_rels/workbook.xml.rels").async("string");
+  const rel = [...rels.matchAll(/<Relationship\b[^>]*>/g)].map((x: any) => x[0]).find((t: string) => attr(t, "Id") === rid);
+  const tgt = attr(rel, "Target"); return tgt.startsWith("/") ? tgt.slice(1) : "xl/" + tgt.replace(/^\.\//, "");
+}
+const cellRe = (addr: string) => new RegExp(`<c r="${addr}"(?:\\s[^>]*?)?(?:/>|>[\\s\\S]*?</c>)`);
+async function readRange(zip: any, sheet: string, range: string) {
+  const sx = await zip.file(await sheetFile(zip, sheet)).async("string");
+  const ssx = zip.file("xl/sharedStrings.xml") ? await zip.file("xl/sharedStrings.xml").async("string") : "";
+  const ss = [...ssx.matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m: any) => unxml([...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((t: any) => t[1]).join("")));
+  const { c1, r1, c2, r2 } = parseRange(range); const values: any[][] = [], formulas: any[][] = [];
+  for (let r = r1; r <= r2; r++) {
+    const vr: any[] = [], fr: any[] = [];
+    for (let c = c1; c <= c2; c++) {
+      const m = sx.match(cellRe(colStr(c) + r)); let v: any = null, f: any = null;
+      if (m) {
+        const t = attr(m[0].split(">")[0], "t"); const fm = m[0].match(/<f[^>]*>([\s\S]*?)<\/f>/) || m[0].match(/<f[^>]*\/>/);
+        if (fm) f = "=" + unxml(fm[1] || "");
+        const vm = m[0].match(/<v>([\s\S]*?)<\/v>/);
+        if (t === "s" && vm) v = ss[+vm[1]]; else if (t === "inlineStr") v = unxml((m[0].match(/<t[^>]*>([\s\S]*?)<\/t>/) || [])[1] || "");
+        else if (vm) v = t === "str" || t === "e" ? unxml(vm[1]) : (t === "b" ? vm[1] === "1" : Number(vm[1]));
+      }
+      vr.push(v); fr.push(f);
+    }
+    values.push(vr); formulas.push(fr);
+  }
+  return { values, formulas };
+}
+function cellXml(addr: string, s: string | undefined, v: any) {
+  const st = s ? ` s="${s}"` : "";
+  if (v === null || v === undefined || v === "") return `<c r="${addr}"${st}/>`;
+  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) v = (Date.UTC(+v.slice(0, 4), +v.slice(5, 7) - 1, +v.slice(8, 10)) - Date.UTC(1899, 11, 30)) / 86400000;
+  if (typeof v === "string" && /^-?\$?[\d,]+(\.\d+)?$/.test(v.trim())) v = Number(v.replace(/[$,]/g, ""));
+  if (typeof v === "number") return `<c r="${addr}"${st}><v>${v}</v></c>`;
+  if (typeof v === "boolean") return `<c r="${addr}"${st} t="b"><v>${v ? 1 : 0}</v></c>`;
+  return `<c r="${addr}"${st} t="inlineStr"><is><t xml:space="preserve">${xml(String(v))}</t></is></c>`;
+}
+async function writeRange(g: any, sheet: string, range: string, values: any[][]) {
+  const { rel, zip } = await loadCalc(g);
+  const path = await sheetFile(zip, sheet); let sx = await zip.file(path).async("string");
+  const { c1, r1, c2, r2 } = parseRange(range);
+  if (values.length !== r2 - r1 + 1 || values.some((row) => row.length !== c2 - c1 + 1)) throw new Error("values do not match the range size");
+  const before = (await readRange(zip, sheet, range));
+  if (before.formulas.flat().some((f: any) => f)) return { refused: true, before };
+  for (let r = r1; r <= r2; r++) {
+    let rowM = sx.match(new RegExp(`<row r="${r}"(?:\\s[^>]*?)?(?:/>|>[\\s\\S]*?</row>)`));
+    if (!rowM) {   // insert a new row in order
+      const rows = [...sx.matchAll(/<row r="(\d+)"/g)]; const nxt = rows.find((m: any) => +m[1] > r);
+      const nr = `<row r="${r}"></row>`;
+      sx = nxt ? sx.slice(0, nxt.index) + nr + sx.slice(nxt.index) : sx.replace("</sheetData>", nr + "</sheetData>").replace("<sheetData/>", `<sheetData>${nr}</sheetData>`);
+      rowM = sx.match(new RegExp(`<row r="${r}"(?:\\s[^>]*?)?(?:/>|>[\\s\\S]*?</row>)`));
+    }
+    let row = rowM![0]; if (row.endsWith("/>")) row = row.slice(0, -2) + "></row>";
+    for (let c = c1; c <= c2; c++) {
+      const addr = colStr(c) + r; const v = values[r - r1][c - c1]; const m = row.match(cellRe(addr));
+      if (m) row = row.replace(m[0], cellXml(addr, attr(m[0].split(">")[0], "s"), v));
+      else {
+        const cells = [...row.matchAll(/<c r="([A-Z]+)\d+"/g)]; const nxt = cells.find((x: any) => colNum(x[1]) > c);
+        const nc = cellXml(addr, undefined, v);
+        row = nxt ? row.slice(0, nxt.index) + nc + row.slice(nxt.index) : row.replace("</row>", nc + "</row>");
+      }
+    }
+    sx = sx.replace(rowM![0], row);
+  }
+  zip.file(path, sx);
+  let wbx = await zip.file("xl/workbook.xml").async("string");
+  if (/<calcPr\b/.test(wbx)) { if (!/fullCalcOnLoad=/.test(wbx)) wbx = wbx.replace(/<calcPr\b/, '<calcPr fullCalcOnLoad="1"'); }
+  else wbx = wbx.replace("</workbook>", '<calcPr fullCalcOnLoad="1"/></workbook>');
+  zip.file("xl/workbook.xml", wbx);
+  const out = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+  const r = await fetch("https://graph.microsoft.com/v1.0" + `${itemPath(g.folder_path, rel)}:/content`, { method: "PUT", headers: { Authorization: `Bearer ${await graphToken()}`, "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }, body: out });
+  if (r.status === 423) throw new Error("The calculator is open and locked by someone in Excel. Close it and ask again.");
+  if (!r.ok) throw new Error(`SharePoint ${r.status} saving the calculator: ${(await r.text()).slice(0, 200)}`);
+  return { refused: false, before };
+}
 const DESK_FIELDS = new Set(["effective", "quote_no", "broker", "broker_comp_pepm", "broker_comp_note", "kerix_tier", "notes", "missing"]);
 
 async function runTool(name: string, a: any, g: any, who: string, log: any[]): Promise<any> {
@@ -83,17 +179,15 @@ async function runTool(name: string, a: any, g: any, who: string, log: any[]): P
     return [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: btoa(b64) }, title: a.path, context: a.pages ? `Focus on pages ${a.pages}.` : undefined }];
   }
   if (name === "read_calculator") {
-    const r = await graph(await wbUrl(g, a.sheet, a.range));
-    return JSON.stringify({ values: r.values, formulas: r.formulas });
+    const { zip } = await loadCalc(g);
+    return JSON.stringify({ ...(await readRange(zip, a.sheet, a.range)), note: "Formula results are as of the file's last save in Excel." });
   }
   if (name === "write_calculator") {
-    const url = await wbUrl(g, a.sheet, a.range);
-    const cur = await graph(url);
-    if (cur.formulas.flat().some((f: any) => typeof f === "string" && f.startsWith("="))) return "Refused: that range has formulas. Write only to yellow input cells.";
-    await graph(url, { method: "PATCH", body: JSON.stringify({ values: a.values }) });
-    log.push({ calc: `${a.sheet}!${a.range}`, before: cur.values, after: a.values, why: a.why });
+    const w = await writeRange(g, a.sheet, a.range, a.values);
+    if (w.refused) return "Refused: that range has formulas. Write only to yellow input cells.";
+    log.push({ calc: `${a.sheet}!${a.range}`, before: w.before.values, after: a.values, why: a.why });
     await sb.from("activity").insert({ who: `Claude (asked by ${who})`, group_id: g.id, change: `Calculator ${a.sheet}!${a.range}: ${a.why}` });
-    return "Written.";
+    return "Written. Totals recalculate when the file is next opened in Excel.";
   }
   if (name === "update_desk") {
     const out: string[] = [];
