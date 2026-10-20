@@ -56,7 +56,7 @@ const TOOLS = [
     input_schema: { type: "object", properties: { sheet: { type: "string" }, range: { type: "string" } }, required: ["sheet", "range"] } },
   { name: "write_calculator", description: "Write values into YELLOW input cells of the group's calculator. values is a 2-D array matching the range. Never write over formulas.",
     input_schema: { type: "object", properties: { sheet: { type: "string" }, range: { type: "string" }, values: { type: "array", items: { type: "array" } }, why: { type: "string" } }, required: ["sheet", "range", "values", "why"] } },
-  { name: "update_desk", description: "Update the group on the desk. checklist: {item: 'yes'|'partial'|'no'} for items census,sbc,rates,renewal,cap,claims,lca,fonzo,workbook,calculator,proposal. fields: any of effective, quote_no, broker, broker_comp_pepm, broker_comp_note, notes, missing. resolve_waiting: text to match an open Waiting On item to close.",
+  { name: "update_desk", description: "Update the group on the desk. checklist: {item: 'yes'|'partial'|'no'} for items census,sbc,rates,renewal,cap,claims,lca,fonzo,workbook,calculator,proposal. fields: any of effective, quote_no, broker, broker_comp_pepm, broker_comp_note, kerix_tier (1-5), notes, missing. resolve_waiting: text to match an open Waiting On item to close.",
     input_schema: { type: "object", properties: { checklist: { type: "object" }, fields: { type: "object" }, resolve_waiting: { type: "string" } } } },
 ];
 
@@ -68,7 +68,7 @@ async function calcPath(g: any) {
   return `${folder}/${f.name}`;
 }
 const wbUrl = async (g: any, sheet: string, range: string) => `${itemPath(g.folder_path, await calcPath(g))}:/workbook/worksheets('${encodeURIComponent(sheet)}')/range(address='${encodeURIComponent(range)}')`;
-const DESK_FIELDS = new Set(["effective", "quote_no", "broker", "broker_comp_pepm", "broker_comp_note", "notes", "missing"]);
+const DESK_FIELDS = new Set(["effective", "quote_no", "broker", "broker_comp_pepm", "broker_comp_note", "kerix_tier", "notes", "missing"]);
 
 async function runTool(name: string, a: any, g: any, who: string, log: any[]): Promise<any> {
   if (name === "list_folder") {
@@ -120,7 +120,7 @@ A DPD team member typed a request. Do it now with the tools, then answer in 1-3 
 Folder layout: 01 Intake, 02 Current & Renewal, 03 Claims, 04 DPD Workbook & FONZO, 05 Quotes, 06 Decision (calculator), 07 Proposal, 08 Sold - Implementation.
 Calculator 'Current Plans' tab, one row per incumbent plan, rows 5-10. Inputs: A plan name, B type, C deductible (ind), D out-of-pocket max (ind), E plan pays % (e.g. 0.8),
 F-I current monthly rates EE/ES/EC/FA, J-M renewal monthly rates EE/ES/EC/FA, N-Q enrollment EE/ES/EC/FA, R decided plan (team picks; leave it alone unless asked).
-Start Here: B11 effective date, B21 "No renewal yet: compare to current rates?" (Yes/No). Decision tab: Broker commission row, $ PEPM per tier.
+Start Here: B11 effective date, D14 Kerix pricing tier 1-5 (Tier 1 $70/$140/$140/$210, 2 $85, 3 $100, 4 $115, 5 $130 per member; ES/EC x2, FA x3; keep it equal to the desk kerix_tier), B21 "No renewal yet: compare to current rates?" (Yes/No). Decision tab: Broker commission row, $ PEPM per tier.
 
 Rules (accuracy is non-negotiable):
 - Copy numbers exactly as printed. Read before you write. If the document is ambiguous (which plan is which, tier order, monthly vs annual, composite vs age-banded), do not guess: ask in your reply and change nothing.
