@@ -30,8 +30,8 @@ button.g{background:#fff;color:var(--navy);border:1px solid var(--line);border-r
 main{padding:0 18px 40px}
 .banner{margin:12px 18px 0;padding:10px 14px;border-radius:8px;background:var(--red);color:#7a2318;font-weight:600}
 .demo{background:var(--yellow);color:#6b4a00}
-table{border-collapse:collapse;width:100%;background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden}
-th{background:#eef2f4;color:var(--navy);font-size:12px;text-align:left;padding:8px;position:sticky;top:0;z-index:2;white-space:nowrap}
+table{border-collapse:separate;border-spacing:0;width:100%;background:var(--card)}
+th{background:#eef2f4;color:var(--navy);font-size:12px;text-align:left;padding:8px;position:sticky;top:0;z-index:2;white-space:nowrap;box-shadow:0 1px 0 var(--line)}
 td{border-top:1px solid var(--line);padding:6px 8px;vertical-align:top}
 td input,td select,td textarea{width:100%;border-color:transparent;background:transparent;padding:4px}
 td input:hover,td select:hover,td textarea:hover{border-color:var(--line);background:#fff}
@@ -57,7 +57,7 @@ textarea{resize:vertical;min-height:30px}
 #login{max-width:360px;margin:12vh auto;background:#fff;border:1px solid var(--line);border-radius:10px;padding:24px}
 #login h2{font:600 22px "IBM Plex Serif",serif;color:var(--navy);margin:0 0 12px}
 #login input{width:100%;margin:6px 0}
-.wrap{overflow:auto;max-height:calc(100vh - 210px);border-radius:8px}
+.wrap{overflow:auto;max-height:calc(100vh - 210px);border-radius:8px;border:1px solid var(--line);background:var(--card)}
 td select{min-width:120px}
 td input[type=date]{min-width:130px}
 .fee td.v{width:auto;min-width:110px}
@@ -145,17 +145,27 @@ async function loadAll(){
     sb.from("sync_runs").select("*").order("at",{ascending:false}).limit(1),sb.from("claude_requests").select("*").order("created_at",{ascending:false}).limit(300)]);
   S.groups=g.data||[];S.docs=d.data||[];S.fees=f.data||[];S.waiting=w.data||[];S.activity=a.data||[];S.runs=r.data||[];S.asks=q.data||[];
   $("#sync").textContent=S.runs[0]?"SharePoint sync: "+new Date(S.runs[0].at).toLocaleString([], {month:"numeric",day:"numeric",hour:"numeric",minute:"2-digit"}):"SharePoint sync: not run yet";
-  render(); if($("#drawer").classList.contains("on")&&openId) openGroup(openId);
+  refresh();
 }
+// Live reloads must not wipe what someone is typing: hold the redraw until focus leaves the field.
+let pendView=false, pendDrawer=false;
+const typing=el=>{ const a=document.activeElement; return a&&el.contains(a)&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName); };
+function refresh(){
+  if(typing($("#view"))) pendView=true; else { pendView=false; render(); }
+  if($("#drawer").classList.contains("on")&&openId){ if(typing($("#drawer"))) pendDrawer=true; else { pendDrawer=false; openGroup(openId); } }
+}
+document.addEventListener("focusout",()=>setTimeout(()=>{ if(pendView||pendDrawer) refresh(); },0));
 let t0; function live(){ sb.channel("all").on("postgres_changes",{event:"*",schema:"public"},()=>{clearTimeout(t0);t0=setTimeout(loadAll,400);}).subscribe(); }
 async function save(table,match,patch,label,gid){
   // update local copy first
   const rows={groups:S.groups,docs:S.docs,fee_lines:S.fees,waiting_on:S.waiting}[table];
   const row=rows.find(r=>Object.entries(match).every(([k,v])=>r[k]==v)); if(row) Object.assign(row,patch);
   if(DEMO){render();return;}
-  const {error}=await sb.from(table).update({...patch,updated_by:me,updated_at:new Date().toISOString()}).match(match);
-  if(error){alert("Not saved: "+error.message);return;}
+  const {data,error}=await sb.from(table).update({...patch,updated_by:me,updated_at:new Date().toISOString()}).match(match).select();
+  if(error){alert("Not saved: "+error.message);return false;}
+  if(!data||!data.length){alert("Not saved: the database didn't accept the change (no row updated). Refresh and try again.");return false;}
   await sb.from("activity").insert({who:me,group_id:gid||null,change:label});
+  return true;
 }
 function tabs(){ const T=[["pipeline","Pipeline"],["snapshot","Snapshot"],["fees","Fee Check"],["waiting","Waiting On"],["activity","Activity"]];
   $("#tabs").innerHTML=T.map(([k,v])=>`<button data-t="${k}" class="${k==tab?"on":""}">${v}</button>`).join("");
@@ -244,7 +254,7 @@ function waiting(v,G){ const ids=new Set(G.map(g=>g.id));
     const {error}=await sb.from("waiting_on").insert({...row,updated_by:me}); if(error) alert(error.message); else { await sb.from("activity").insert({who:me,group_id:row.group_id,change:"Waiting on: "+row.what}); loadAll(); } };
 }
 function activity(v){ v.innerHTML=`<div class="wrap"><table><tr><th>When</th><th>Who</th><th>Change</th></tr>${S.activity.map(a=>`<tr><td class="small">${new Date(a.at).toLocaleString()}</td><td class="small">${esc(a.who)}</td><td>${esc(a.change)}</td></tr>`).join("")||'<tr><td colspan="3" class="small">No activity yet.</td></tr>'}</table></div>`; }
-let openId=null;
+let openId=null, askDraft={id:null,text:""};
 function openGroup(id){ const g=S.groups.find(x=>x.id==id); if(!g) return; openId=id; const D=$("#drawer");
   const F=[["quote_no","Benefit RE quote #"],["quote_date","Quote date"],["broker","Broker"],["broker_comp_pepm","Broker commission: $ PEPM the broker asked for (0 if none)","number"],["broker_comp_note","Commission note (who asked, % or flat, where it is in writing)"],["sent_date","Sent date","date"],["broker_response","Broker response"],["outcome","Outcome"]];
   const ps=g.proposal_status, busy=ps=="requested"||ps=="building";
@@ -257,7 +267,7 @@ function openGroup(id){ const g=S.groups.find(x=>x.id==id); if(!g) return; openI
      ${g.proposal_url?`<p style="margin:0 0 8px"><a href="${esc(g.proposal_url)}" target="_blank" rel="noopener">Open latest draft proposal</a></p>`:""}
      <button class="b" id="preq" ${busy?"disabled style='opacity:.5'":""}>${busy?"Request in the queue":g.proposal_url?"Rebuild proposal":"Request proposal"}</button>
      ${busy?'<button class="g" id="pcancel" style="margin-left:6px">Cancel request</button>':""}
-     <div class="small" style="margin-top:6px">Claude builds a DRAFT from the pricing calculator and saves it to the group's 06 Proposal folder. Drafts stay internal while the group is on HOLD.</div>
+     <div class="small" style="margin-top:6px">Claude builds a DRAFT from the pricing calculator and saves it to the group's 07 Proposal folder. Drafts stay internal while the group is on HOLD.</div>
    </div>
    <div class="card" style="margin:10px 0">
      <b style="font-size:15px">Ask Claude</b>
@@ -282,11 +292,16 @@ function openGroup(id){ const g=S.groups.find(x=>x.id==id); if(!g) return; openI
   $("#askgo").onclick=async()=>{ const ask=$("#askq").value.trim(); if(!ask) return; $("#askgo").disabled=true;
     const {data,error}=await sb.from("claude_requests").insert({group_id:g.id,ask,created_by:me}).select().single();
     if(error){alert(error.message);$("#askgo").disabled=false;return;}
-    S.asks=[data,...(S.asks||[])]; openGroup(id);
+    askDraft={id:null,text:""}; S.asks=[data,...(S.asks||[])]; openGroup(id);
     const {error:e2}=await sb.functions.invoke("ask-claude",{body:{id:data.id}}); if(e2) alert("Claude couldn't start: "+e2.message); };
   if($("#pcancel")) $("#pcancel").onclick=async()=>{ await save("groups",{id:g.id},{proposal_status:null,proposal_note:"Request cancelled"},`${g.name}: proposal request cancelled`,g.id); openGroup(id); };
-  D.querySelectorAll("[data-f]").forEach(el=>el.onchange=()=>{ let val=el.value; if(el.dataset.f=="kerix") val=val===""?null:val==="true"; if(el.dataset.f=="kerix_tier") val=val===""?null:+val;
-    save("groups",{id:g.id},{[el.dataset.f]:val||val===false?val:null},`${g.name}: ${el.dataset.f} → ${val}`,g.id); });
+  if(askDraft.id==id) $("#askq").value=askDraft.text; $("#askq").oninput=e=>{askDraft={id,text:e.target.value};};
+  D.querySelectorAll("[data-f]").forEach(el=>el.onchange=async()=>{ const f=el.dataset.f; let val=el.value.trim()===""?null:el.value;
+    if(f=="kerix") val=val==null?null:val==="true"; if(f=="kerix_tier") val=val==null?null:+val;
+    if(f=="broker_comp_pepm"&&val!=null){ val=parseFloat(val); if(isNaN(val)){ alert("Broker commission must be a number (0 if none)."); return; } }
+    const ok=await save("groups",{id:g.id},{[f]:val},`${g.name}: ${f} → ${val??"(blank)"}`,g.id);
+    if(ok){ el.style.background="#e6f4ef"; setTimeout(()=>el.style.background="",900); }
+    if(f=="kerix") openGroup(id); });
 }
 async function addGroup(){ const name=prompt("Group name"); if(!name) return; const broker=prompt("Broker (e.g. Jason Roll (Kerix))")||null;
   const id=name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
