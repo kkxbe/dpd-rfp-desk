@@ -51,8 +51,8 @@ function safeRel(rel: string) { if (!rel || rel.includes("..") || rel.startsWith
 const TOOLS = [
   { name: "list_folder", description: "List files in the group's SharePoint folder or one of its subfolders (e.g. '02 Current & Renewal'). Empty path = the group folder.",
     input_schema: { type: "object", properties: { path: { type: "string" } } } },
-  { name: "open_pdf", description: "Open a PDF from the group folder so you can read it (all pages, or a page range like '15-20' to keep it small).",
-    input_schema: { type: "object", properties: { path: { type: "string" }, pages: { type: "string" } }, required: ["path"] } },
+  { name: "open_file", description: "Open any file from the group folder so you can read it: PDF (all pages, or a page range like '15-20'), Excel .xlsx/.xlsm (every sheet as rows of values), Word .docx (text, tables, and any pasted images such as a screenshot of a benefits grid), or an image. Use list_folder first for the exact name.",
+    input_schema: { type: "object", properties: { path: { type: "string" }, pages: { type: "string" }, sheet: { type: "string", description: "xlsx only: one sheet name" } }, required: ["path"] } },
   { name: "read_calculator", description: "Read a range from the group's calculator (06 Decision/DPD Calculator - <group>.xlsx). Sheets: 'Start Here', 'Current Plans', 'Decision', 'Decided Quote'.",
     input_schema: { type: "object", properties: { sheet: { type: "string" }, range: { type: "string" } }, required: ["sheet", "range"] } },
   { name: "write_calculator", description: "Write values into YELLOW input cells of the group's calculator. values is a 2-D array matching the range. Never write over formulas.",
@@ -164,6 +164,47 @@ async function writeRange(g: any, sheet: string, range: string, values: any[][])
   if (!r.ok) throw new Error(`SharePoint ${r.status} saving the calculator: ${(await r.text()).slice(0, 200)}`);
   return { refused: false, before };
 }
+
+// ---- reading any file type for the model ----
+const b64of = (buf: Uint8Array) => { let s = ""; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode(...buf.subarray(i, i + 0x8000)); return btoa(s); };
+const IMG: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
+async function openAny(a: any, buf: Uint8Array): Promise<any> {
+  const ext = (a.path.split(".").pop() || "").toLowerCase();
+  const head = String.fromCharCode(...buf.subarray(0, 5));
+  if (head.startsWith("%PDF")) return [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: b64of(buf) }, title: a.path, context: a.pages ? `Focus on pages ${a.pages}.` : undefined }];
+  if (IMG[ext]) return [{ type: "image", source: { type: "base64", media_type: IMG[ext], data: b64of(buf) } }];
+  if (!head.startsWith("PK")) return `Can't read ${a.path}: it is not a PDF, Excel, Word or image file (.${ext}).`;
+  const zip = await JSZip.loadAsync(buf);
+  if (zip.file("xl/workbook.xml")) {
+    const wb = await zip.file("xl/workbook.xml").async("string");
+    const names = [...wb.matchAll(/<sheet\b[^>]*>/g)].map((x: any) => unxml(attr(x[0], "name") || ""));
+    let out = `Workbook ${a.path}. Sheets: ${names.join(", ")}\n`;
+    for (const nm of names) {
+      if (a.sheet && nm !== a.sheet) continue;
+      const sx = await zip.file(await sheetFile(zip, nm)).async("string");
+      const dim = (sx.match(/<dimension ref="([^"]+)"/) || [])[1];
+      const last = [...sx.matchAll(/<c r="([A-Z]+)(\d+)"/g)];
+      if (!last.length) { out += `\n== ${nm}: (empty)\n`; continue; }
+      const maxC = Math.min(40, Math.max(...last.map((m: any) => colNum(m[1])))), maxR = Math.min(400, Math.max(...last.map((m: any) => +m[2])));
+      const { values } = await readRange(zip, nm, `A1:${colStr(maxC)}${maxR}`);
+      out += `\n== ${nm} (${dim || ""})\n` + values.map((r, i) => r.some((v) => v !== null && v !== "") ? `${i + 1}\t` + r.map((v) => v ?? "").join("\t") : "").filter(Boolean).join("\n") + "\n";
+      if (out.length > 150_000) { out += "\n(truncated: ask for one sheet with the sheet parameter)"; break; }
+    }
+    return out.slice(0, 160_000);
+  }
+  if (zip.file("word/document.xml")) {
+    const dx = await zip.file("word/document.xml").async("string");
+    const text = dx.replace(/<\/w:tc>/g, " | ").replace(/<\/w:p>/g, "\n").replace(/<w:tab\/>/g, "\t").replace(/<[^>]+>/g, "");
+    const blocks: any[] = [{ type: "text", text: `Word document ${a.path}:\n` + (unxml(text).trim() || "(no typed text; content is in the images below)") }];
+    const imgs = Object.keys(zip.files).filter((f) => /^word\/media\/.+\.(png|jpe?g|gif)$/i.test(f)).slice(0, 6);
+    for (const f of imgs) {
+      const ib = await zip.file(f).async("uint8array"); if (ib.length > 4_500_000) continue;
+      blocks.push({ type: "image", source: { type: "base64", media_type: IMG[f.split(".").pop()!.toLowerCase()], data: b64of(ib) } });
+    }
+    return blocks;
+  }
+  return `Can't read ${a.path}: unsupported Office file.`;
+}
 const DESK_FIELDS = new Set(["effective", "quote_no", "broker", "broker_comp_pepm", "broker_comp_note", "kerix_tier", "notes", "missing"]);
 
 async function runTool(name: string, a: any, g: any, who: string, log: any[]): Promise<any> {
@@ -171,12 +212,11 @@ async function runTool(name: string, a: any, g: any, who: string, log: any[]): P
     const r = await graph(`${itemPath(g.folder_path, a.path ? safeRel(a.path) : "")}:/children?$select=name,size,folder,lastModifiedDateTime&$top=200`);
     return r.value.map((x: any) => `${x.folder ? "[folder] " : ""}${x.name}${x.folder ? "" : ` (${Math.round(x.size / 1024)} KB, ${x.lastModifiedDateTime.slice(0, 10)})`}`).join("\n") || "(empty)";
   }
-  if (name === "open_pdf") {
+  if (name === "open_file" || name === "open_pdf") {
     const res = await graph(`${itemPath(g.folder_path, safeRel(a.path))}:/content`, {}, true) as Response;
     const buf = new Uint8Array(await res.arrayBuffer());
     if (buf.length > 30_000_000) return "File too large to open (over 30 MB).";
-    let b64 = ""; for (let i = 0; i < buf.length; i += 0x8000) b64 += String.fromCharCode(...buf.subarray(i, i + 0x8000));
-    return [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: btoa(b64) }, title: a.path, context: a.pages ? `Focus on pages ${a.pages}.` : undefined }];
+    return await openAny(a, buf);
   }
   if (name === "read_calculator") {
     const { zip } = await loadCalc(g);
@@ -213,7 +253,9 @@ A DPD team member typed a request. Do it now with the tools, then answer in 1-3 
 
 Folder layout: 01 Intake, 02 Current & Renewal, 03 Claims, 04 DPD Workbook & FONZO, 05 Quotes, 06 Decision (calculator), 07 Proposal, 08 Sold - Implementation.
 Calculator 'Current Plans' tab, one row per incumbent plan, rows 5-10. Inputs: A plan name, B type, C deductible (ind), D out-of-pocket max (ind), E plan pays % (e.g. 0.8),
-F-I current monthly rates EE/ES/EC/FA, J-M renewal monthly rates EE/ES/EC/FA, N-Q enrollment EE/ES/EC/FA, R decided plan (team picks; leave it alone unless asked).
+F-I current monthly rates EE/ES/EC/FA, J-M renewal monthly rates EE/ES/EC/FA, N-Q enrollment EE/ES/EC/FA, S why-this-match note, T PCP copay, U generic Rx copay. Column R (decided plan) is a formula: the decided plan is typed on the Decision tab C28:C33, row 28 = Current Plans row 5, and so on (team picks; leave it alone unless asked).
+Current rates are often a per-employee roster (one line per employee with plan and tier): count employees per plan and tier for enrollment and take each plan/tier's monthly total as the rate. Plan designs may be a Word file whose benefits grid is a pasted picture: open_file returns the picture, read it.
+If there is no carrier renewal yet, put the current rates in J-M too and set Start Here B21 to Yes; never invent a renewal increase.
 Start Here: B11 effective date, D14 Kerix pricing tier 1-5 (Tier 1 $70/$140/$140/$210, 2 $85, 3 $100, 4 $115, 5 $130 per member; ES/EC x2, FA x3; keep it equal to the desk kerix_tier), B21 "No renewal yet: compare to current rates?" (Yes/No). Decision tab: Broker commission row, $ PEPM per tier.
 
 Rules (accuracy is non-negotiable):
