@@ -152,11 +152,11 @@ def main():
     built = failed = 0
     for grp in groups:
         if not claim(grp["id"], "requested" if grp.get("proposal_status") == "requested" else None):
-            print("skip (taken)", grp["name"]); continue
+            print("skip (taken)"); continue
         try: status, note, url = build(grp, code)
         except Exception as e: status, note, url = "failed", f"Builder error: {str(e)[:220]}", None
         finish(grp["id"], status, note, url, "Draft proposal built and saved to 07 Proposal (cloud builder)" if status == "ready" else f"Proposal failed: {note}")
-        print(status.upper(), grp["name"], "|", note)
+        print(status.upper())  # no names or notes: this repo's Action logs are public
         built += status == "ready"; failed += status != "ready"
     sb("POST", "sync_runs", {"kind": "proposal", "summary": f"cloud builder: {built} built, {failed} failed"}, prefer="return=minimal")
 
