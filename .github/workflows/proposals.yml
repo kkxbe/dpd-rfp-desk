@@ -15,7 +15,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Check for work first (fast exit)
@@ -31,11 +31,18 @@ jobs:
           echo "::notice::requests waiting: $n"; if [ "$n" != "0" ]; then echo "go=1" >> $GITHUB_OUTPUT; fi
       - name: Install LibreOffice, poppler, Python packages
         if: steps.check.outputs.go == '1'
+        timeout-minutes: 8
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libreoffice-calc poppler-utils >/dev/null || { echo "::error::apt install of LibreOffice failed"; exit 1; }
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update -qq && sudo -E apt-get install -y -qq --no-install-recommends libreoffice-calc poppler-utils >/dev/null || { echo "::error::apt install of LibreOffice failed"; exit 1; }
           pip install -q openpyxl reportlab pdfplumber pillow || { echo "::error::pip install failed"; exit 1; }
+      - name: Warm up LibreOffice
+        if: steps.check.outputs.go == '1'
+        timeout-minutes: 4
+        run: timeout 180 soffice --headless --terminate_after_init || true
       - name: Build
         if: steps.check.outputs.go == '1'
+        timeout-minutes: 15
         env:
           MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
           MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
