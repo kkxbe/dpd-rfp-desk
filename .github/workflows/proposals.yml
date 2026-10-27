@@ -1,0 +1,43 @@
+name: Build requested proposals
+on:
+  schedule:
+    - cron: "*/10 13-23 * * 1-5"   # every 10 min, about 7am-6pm Mountain, weekdays
+    - cron: "*/10 0 * * 2-6"
+  workflow_dispatch:
+    inputs:
+      groups:
+        description: "Build these desk groups now (comma-separated names), whatever their status"
+        required: false
+        default: ""
+concurrency:
+  group: proposals
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for work first (fast exit)
+        id: check
+        env:
+          KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FORCE: ${{ github.event.inputs.groups }}
+        run: |
+          if [ -n "$FORCE" ]; then echo "go=1" >> $GITHUB_OUTPUT; exit 0; fi
+          n=$(curl -s "https://uwcciwmsjzaslxhykyqc.supabase.co/rest/v1/groups?select=id&proposal_status=eq.requested" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | python3 -c "import sys,json;print(len(json.load(sys.stdin)))")
+          echo "requests: $n"; [ "$n" != "0" ] && echo "go=1" >> $GITHUB_OUTPUT || true
+      - name: Install LibreOffice, poppler, Python packages
+        if: steps.check.outputs.go == '1'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libreoffice-calc poppler-utils >/dev/null
+          pip install -q openpyxl reportlab pdfplumber pillow
+      - name: Build
+        if: steps.check.outputs.go == '1'
+        env:
+          MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
+          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+          MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FORCE_GROUPS: ${{ github.event.inputs.groups }}
+        run: python3 builder/run.py
