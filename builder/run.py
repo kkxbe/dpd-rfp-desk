@@ -15,7 +15,9 @@ SP_HOST, SP_SITE, SP_LIB = "directpaydesigns432.sharepoint.com", "/sites/DirectP
 SP_ROOT = "2026 DPD RFPs/Level-Funded"
 TOOLKIT = "_DPD RFP Toolkit/5 System - proposal generator (do not edit)"
 WORK = os.path.abspath("work")
-env = os.environ.get
+def env(k, d=None):
+    v = os.environ.get(k)
+    return v.strip() if isinstance(v, str) else d  # pasted secrets often carry a trailing newline
 from zoneinfo import ZoneInfo
 MT = ZoneInfo("America/Denver")
 
