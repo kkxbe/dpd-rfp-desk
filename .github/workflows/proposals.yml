@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -25,13 +25,15 @@ jobs:
           FORCE: ${{ github.event.inputs.groups }}
         run: |
           if [ -n "$FORCE" ]; then echo "go=1" >> $GITHUB_OUTPUT; exit 0; fi
-          n=$(curl -s "https://uwcciwmsjzaslxhykyqc.supabase.co/rest/v1/groups?select=id&proposal_status=eq.requested" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | python3 -c "import sys,json;print(len(json.load(sys.stdin)))")
-          echo "requests: $n"; [ "$n" != "0" ] && echo "go=1" >> $GITHUB_OUTPUT || true
+          r=$(curl -s "https://uwcciwmsjzaslxhykyqc.supabase.co/rest/v1/groups?select=id&proposal_status=eq.requested" -H "apikey: $KEY" -H "Authorization: Bearer $KEY")
+          n=$(echo "$r" | python3 -c "import sys,json;d=json.load(sys.stdin);print(len(d) if isinstance(d,list) else 'ERR')" 2>/dev/null || echo ERR)
+          if [ "$n" = "ERR" ]; then echo "::error::Supabase refused the service role key (check the SUPABASE_SERVICE_ROLE_KEY secret)"; exit 1; fi
+          echo "::notice::requests waiting: $n"; if [ "$n" != "0" ]; then echo "go=1" >> $GITHUB_OUTPUT; fi
       - name: Install LibreOffice, poppler, Python packages
         if: steps.check.outputs.go == '1'
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libreoffice-calc poppler-utils >/dev/null
-          pip install -q openpyxl reportlab pdfplumber pillow
+          sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libreoffice-calc poppler-utils >/dev/null || { echo "::error::apt install of LibreOffice failed"; exit 1; }
+          pip install -q openpyxl reportlab pdfplumber pillow || { echo "::error::pip install failed"; exit 1; }
       - name: Build
         if: steps.check.outputs.go == '1'
         env:

@@ -154,11 +154,24 @@ def main():
         if not claim(grp["id"], "requested" if grp.get("proposal_status") == "requested" else None):
             print("skip (taken)"); continue
         try: status, note, url = build(grp, code)
-        except Exception as e: status, note, url = "failed", f"Builder error: {str(e)[:220]}", None
+        except Exception as e:
+            status, note, url = "failed", f"Builder error: {str(e)[:220]}", None
+            print(f"::warning::group build error: {type(e).__name__}: {scrub(e)}")
         finish(grp["id"], status, note, url, "Draft proposal built and saved to 07 Proposal (cloud builder)" if status == "ready" else f"Proposal failed: {note}")
-        print(status.upper())  # no names or notes: this repo's Action logs are public
+        print(f"::notice::{status.upper()}")  # no names or notes: this repo's Action logs are public
         built += status == "ready"; failed += status != "ready"
     sb("POST", "sync_runs", {"kind": "proposal", "summary": f"cloud builder: {built} built, {failed} failed"}, prefer="return=minimal")
 
+def scrub(t):
+    """Error text for the public log: no folder or group names."""
+    t = re.sub(r"root:/[^ ]*", "root:/<path>", str(t)); t = re.sub(r"'[^']*'", "'<x>'", t)
+    return t[:300]
+
 if __name__ == "__main__":
-    main()
+    for k in ("MS_TENANT_ID", "MS_CLIENT_ID", "MS_CLIENT_SECRET", "SUPABASE_SERVICE_ROLE_KEY"):
+        if not env(k): print(f"::error::Secret {k} is missing or empty"); sys.exit(1)
+    try:
+        main()
+    except Exception as e:
+        import traceback; tb = traceback.extract_tb(e.__traceback__)[-1]
+        print(f"::error::{type(e).__name__} at run.py line {tb.lineno} ({tb.name}): {scrub(e)}"); sys.exit(1)
